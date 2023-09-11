@@ -12,6 +12,11 @@ from urllib3.exceptions import InsecureRequestWarning # to disable warnings
 from urllib3 import disable_warnings 
 
 class SearchApp(QMainWindow):
+    
+    now_date = None
+    date_pattern = r'([1-9]|10|11|12)-([1-9]|[12][0-9]|3[01])' # M-D 의 패턴
+    time_pattern = r'([01]\d|2[0-3]):([0-5]\d)' # hh-mm 의 패턴
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("동향 크롤링 툴 - 중국어 버전 (v2.0)")
@@ -126,8 +131,7 @@ class SearchApp(QMainWindow):
         self.status_label.setAlignment(Qt.AlignCenter)
         self.status_label.setMinimumHeight(40)  # 최소 높이 설정        
         self.status_label.setText("1. 로우데이터 추출: 검색을 원하는 시간을 설정 후 검색버튼을 눌러주세요.\n \
-2. 키워드데이터 추출: 추가로 키워드를 입력 후 검색버튼을 눌러주세요.\n \
-미구현 - 3. 탑 키워드 확인: 가장 많이 언급된 단어 5개를 하단의 창에서 확인해주세요.")
+2. 키워드데이터 추출: 추가로 키워드를 입력 후 검색버튼을 눌러주세요.")
         layout.addWidget(self.status_label)
 
         # 탑 키워드 결과를 표시할 QLabel 추가
@@ -148,14 +152,17 @@ class SearchApp(QMainWindow):
 
     def search_clicked(self):
         start_datetime = self.start_date_edit.dateTime()
-        #start_datetime = start_datetime.addSecs(self.start_hour_edit.time().hour() * 3600 + self.start_minute_edit.time().minute() * 60)
+        start_datetime = start_datetime.addSecs(self.start_hour_edit.time().hour() * 3600 + self.start_minute_edit.time().minute() * 60)
         start_date = start_datetime.toString("yyyy-MM-dd HH:mm")
 
         end_datetime = self.end_date_edit.dateTime()
-        #end_datetime = end_datetime.addSecs(self.end_hour_edit.time().hour() * 3600 + self.end_minute_edit.time().minute() * 60 + 59)
+        end_datetime = end_datetime.addSecs(self.end_hour_edit.time().hour() * 3600 + self.end_minute_edit.time().minute() * 60 + 59)
         end_date = end_datetime.toString("yyyy-MM-dd HH:mm")
         #print(start_datetime, end_datetime)
         
+        self.now_date = datetime.now()
+        self.now_date = self.now_date.replace(second=0, microsecond=0)
+
         self.search_button.setText("작업중")  # 버튼 텍스트 변경
         self.search_button.setEnabled(False)  # 버튼 비활성화
 
@@ -164,383 +171,203 @@ class SearchApp(QMainWindow):
 
         # 검색할 페이지 및 게시물 데이터 세팅
         self.status_label.setText("검색할 페이지 계산중")
-        search_page = self.get_search_page(start_date, end_date)
+        # search_url_list = self.get_search_url_list(start_date, end_date)        
+        search_url_list = ['https://tieba.baidu.com/p/8589742214']
 
-        # 검색할 게시물 돌면서 results에 세팅
-        # 검색 키워드 입력 시 키워드 검색 데이터 추출
-        keyword = self.keyword_input.text().strip()
-        if keyword:
-            keyword_data = self.find_keyword_contents(search_page, start_date, end_date, keyword)
-            df = pd.DataFrame(keyword_data)        
-            start_datetime_str = start_datetime.toString("yyyyMMddHHmm")
-            end_datetime_str = end_datetime.toString("yyyyMMddHHmm")
-            df.to_excel(f'keyword_data ({start_datetime_str}-{end_datetime_str}).xlsx', index=False)
 
-        # 키워드 미 입력 시 일반 로우데이터 출력
-        else:
-            crawled_data = self.get_element_contents(search_page, start_date, end_date)
-
+        # 찾을 url list가 있으면
+        if (len(search_url_list) > 0):
+            # 검색할 게시물 돌면서 results에 세팅
+            # 검색 키워드 입력 시 키워드 검색 데이터 추출
+            # 키워드 미 입력 시 일반 로우데이터 출력
+            # 키워드는 A,B,C,D,... 식으로 ',' 콤마로 구분
+            keywords = []
+            if (self.keyword_input.text() is not None and self.keyword_input.text().strip() != ''):
+                keywords = self.keyword_input.text().split(',')
+            crawled_data = self.get_element_contents(search_url_list, start_date, end_date, keywords)
             df = pd.DataFrame(crawled_data)        
             start_datetime_str = start_datetime.toString("yyyyMMddHHmm")
             end_datetime_str = end_datetime.toString("yyyyMMddHHmm")
             df.to_excel(f'crawled_data ({start_datetime_str}-{end_datetime_str}).xlsx', index=False)
-
-        self.status_label.setText(f"저장완료!")
-
-        """# 5초 후에 "저장완료!" 메시지를 지움
-        QTimer.singleShot(5000, self.show_results)"""
+            self.status_label.setText(f"저장완료!")
         
         self.search_button.setText("검색")  # 버튼 텍스트 변경
         self.search_button.setEnabled(True)  # 버튼 활성화
-
-        # 결과를 표시하는 QLabel 업데이트
-        top_keywords = self.get_top_keywords()  # 가장 많이 언급된 상위 5개 키워드를 가져오는 함수를 호출하도록 수정하세요.
-        top_keywords_text = "상위 5개 키워드:\n" + "\n".join(top_keywords)
-        self.result_label.setText(top_keywords_text)
         
 
-    def show_results(self):
-        """
-        # "저장완료!" 메시지 지우기
-        self.status_label.clear()
-        """
 
-        # 결과를 표시하는 QLabel 업데이트
-        top_keywords = self.get_top_keywords()  # 가장 많이 언급된 상위 5개 키워드를 가져오는 함수를 호출하도록 수정하세요.
-        top_keywords_text = "상위 5개 키워드:\n" + "\n".join(top_keywords)
-        self.result_label.setText(top_keywords_text)
-        
 
     def update_progress(self, value):
         self.progress_bar.setValue(int(value * 100))
 
-    # 가장 많이 언급된 상위 5개 키워드를 가져오는 함수를 구현
-    def get_top_keywords(self, title, content):
-        # 여기에 적절한 로직을 추가하여 상위 5개 키워드를 가져오세요.
-        # 이 함수는 결과 데이터를 분석하여 가장 많이 언급된 키워드를 찾는 로직을 포함해야 합니다.
-        # 예를 들어 Counter 클래스를 사용하여 키워드 빈도를 계산할 수 있습니다.
-        # 결과는 리스트 형태로 반환하세요.
-        
-        keywords_list = []
-        # keywords_list = ['밸런스', 'pvp', '클래스', '직업', '건슬', '슬레', '슬레이어', '건슬링어', '소서', '캐릭터', '캐릭', '컨텐츠', '필드보스',\
-        #                 '쿠크세이튼','퀘스트','접속','서버','장애', '피로도','보상','버그','','골드','도화가', ,'데헌','바드','카멘', \
-        #                 '아이템', '보석','크리스탈','크리스털','먹통', '패스','남캐','여캐', '편린','카던', '어비스','군단장','무기', \
-        #                 '아바타','탈것', '스탯','이벤트','레이드','던전','업데이트','가토','버프','버그']
 
-        #word_list = ""
-        #keyword_list = word_list.split()
-        #colletions.Counter(keyword_list)
-    
-        #keywords_count = collections.Counter(keywords_list)
-        
-        
-        for title_element in title:
-            keyword_list.append(title_element.get_text().strip())
 
-        for content_element in content:         
-            keyword_list.append(content_element.get_text().strip())
-
-        # 제목과 내용을 하나의 텍스트로 합치기
-        combined_text = ' '.join(keyword_list)
-
-        # 공백과 특수문자 제거하여 단어 리스트로 변환
-        words = combined_text.lower().split()
-
-        # 가장 많이 언급된 키워드 5개 추출
-        most_common_keywords = Counter(words).most_common(5)
-
-        # 결과 출력
-        print("가장 많이 언급된 키워드 5개:")
-        for keyword, count in most_common_keywords:
-            print(f"{keyword}: {count}번 언급")
-        
-        return most_common_keywords  # ["키워드1", "키워드2", "키워드3", "키워드4", "키워드5"]
-        
-    # 시작시간과 끝시간을 인자로 받아 검색할 페이지 데이터를 리턴
-    # search_page = key:page_num, value:url_list
-    def get_search_page(self, start_date_str, end_date_str):
+    # 시작시간과 끝시간을 인자로 받아 검색할 url list를 리턴
+    # search_url_list = [url0, url1, url2, .....]
+    def get_search_url_list(self, start_date_str, end_date_str):
         base_url = "https://tieba.baidu.com/f?kw=%E5%91%BD%E8%BF%90%E6%96%B9%E8%88%9F&ie=utf-8"
         start_date = datetime.strptime(start_date_str, "%Y-%m-%d %H:%M")
         end_date = datetime.strptime(end_date_str, "%Y-%m-%d %H:%M")
-        now_date = datetime.now()
+        start_element_datetime = None
+        search_url_list = set() # 순회할 url list(). set() : 중복되지않는 리스트 
+        is_all_finded = False
+        is_block = False # 캡챠 떳는지 여부
         cur_page = 0
         page_interval = 50
-        tmp_url = '' # 위와같은 상황에서 이전페이지부터 시작페이지로 할 경우 바로리스트에 추가해 줄 용도 임시변수
-        tmp_url_list = []
-        search_start_page = search_end_page = -1 # 페이지 검색 후 검색할 페이지 넘버가 정해지면 그때 page_num 을 넣어줌
-        search_page_dic = {}
-        is_all_find = False
-        headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36'
-        }
+
+        # <=====================요부분은 필요없으면 지우세여
+        #get 하는부분에서 일단 header뺴둠
+        # headers = {
+        # 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.66 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36'
+        # }
+        #
         # ca_cert_file = "path/to/ca_certificate.pem"  # 신뢰할 수 있는 CA 인증서 파일 경로
 
-        # 1페이지 부터 돌면서 페이지의 첫번째 글의 날짜만 보고 검색해야 할 페이지인지 확인
-        # 만약 2번째 페이지의 첫째글의 시간이 검색범위에 있는 시간일경우 cur_page - 1 해서 1페이지 부터가 검색범위임
-        while (not is_all_find) :
-            url = f"{base_url}&pn={cur_page}"
-            
-            response = requests.get(url, headers=headers, verify=False) # verify=ca_cert_file
 
+        # 1페이지 부터 돌면서 시작날짜의 이전날짜의 글을 발견할때까지 페이지를 열어본다
+        while (not is_block and not is_all_finded) :
+            url = f"{base_url}&pn={cur_page*page_interval}"            
+            response = requests.get(url, verify=False) # verify=ca_cert_file
             if response.status_code == 200:
+                if 'https://wappass.baidu.com/' in response.url:
+                    self.status_label.setText(f"캡챠 뜸........ㅜㅜ")
+                    print("캡챠 뜸........ㅜㅜ")
+                    is_block = True
+                    continue                          
+                
                 soup = BeautifulSoup(response.text, 'html.parser')
-                print(soup)
                 # 게시판의 게시물들을 접근하기 위한 변수
-                posts = soup.find_all("ul", id_="thread_list") #class_="threadlist_bright j_threadlist_bright"
-
-                # 게시물들의 각 링크를 돌아가며
-                # ahref 값을 찾아 링크 안의 제목과 내용을 긁어온다
+                posts = soup.find_all('li', class_='j_thread_list clearfix thread_item_box')
+                
+                # 현재 페이지의 게시물들을 순회
                 for post in posts:
-                    for li in post.find_all("li"): # 각 페이지의 게시물 접근 
-                        print(li.text)
-                        idx = 0
-                        # 첫째 ul의 공지쪽은 건너뜀
-                        if (li.has_attr("class") and len(li["class"]) > 0 and li["class"][0] == 'thread_top_list_folder'):
-                            continue
+                    each_url = ''                    
+                    if post is not None and post.has_attr('data-tid'):
+                        link = post['data-tid']
+
+                        # 현재 게시물의 링크
+                        each_url = f'https://tieba.baidu.com/p/{link}'
+
+                        # 현재 게시물 시간을 가져옴 (하루 이내면 hh:mm, 그외는 M-D 의 포맷임)
+                        element_date = post.find('span', class_='threadlist_reply_date pull_right j_reply_data')
+                        element_date_str = element_date.contents[0].strip()
+
+                        # 첫 게시물이면 게시물의 시간을 기억해둔다
+                        if start_element_datetime is None:
+                            start_element_datetime = self.get_datetime_by_string(element_date_str)
+
+                        # 시작날짜~끝날짜의 기준에 맞는지 체크
+                        if self.is_valid_date_format(element_date_str, start_date, end_date, start_element_datetime):
+                            # 기준에 맞는 url 이 아니면 list 에 추가해준다
+                            # 중복된 url은 패스
+                            if each_url in search_url_list:
+                                print('중복')
+                            else:
+                                search_url_list.add(each_url)
                         else:
-                            # 두번째부터의 li만 봄
-                            link_element = li.find("a")
-                            tmp_url == ''
-                            each_url = ''
-                            if link_element and link_element.has_attr("href"):
-                                link = link_element["href"]
-                                each_url = f"https://tieba.baidu.com{link}"
+                            is_all_finded = True
 
-                            if idx == 0 :
-                                element_date = li.find('span', class_='pull-right is_show_create_time')
-                                
-                                # 페이지 첫글의 시간을 가져옴 (하루 이내면 n시간전, 그외는 yyyy.mm.dd의 포맷임)
-                                # --> 수정: (하루 이내면 HH:MM 포맷, 그 외는 MM-DD 포맷)
-                                
-                                element_date_str = element_date[0].contents[0]
+                cur_page += 1
+        return search_url_list   
 
-                                # 시작날짜~끝날짜의 기준에 맞으면 search_page_dic에 추가해준다
-                                # --> 수정: HH:MM 포맷이면 당일 동향이므로 search_page_dic에 추가해준다
-                                if self.is_valid_date_format(element_date_str, start_date, end_date, now_date):
-                                    if search_start_page == -1:
-                                        # 현재 검색중인페이지가 2페이지 이상이고 시작 페이지가 세팅이 안되어있으면 이전 페이지가 시작페이지임
-                                        if cur_page > 0 :
-                                            search_start_page = cur_page - page_interval
-                                            pre_page_url_list = tmp_url_list[-page_interval:]
-                                            tmp_url_list.clear()
-                                            search_page_dic[search_start_page] = pre_page_url_list
-                                            if search_page_dic.get(cur_page) is None:
-                                                search_page_dic[cur_page] = []
-                                            search_page_dic[cur_page].append(each_url)
-                                        # 걍 첫페이지임
-                                        else :                                        
-                                            search_start_page = cur_page
-                                            if search_page_dic.get(cur_page) is None:
-                                                search_page_dic[cur_page] = []
-                                            search_page_dic[cur_page].append(each_url)
-                                    else :
-                                        if search_page_dic.get(cur_page) is None:
-                                            search_page_dic[cur_page] = []
-                                        search_page_dic[cur_page].append(each_url)
-
-                                    search_end_page = cur_page
-                                else:
-                                    # 날짜가 넘어간 페이지이면 마지막 페이지
-                                    # 검색할 페이지와 url정보를 이제 다 들고 있으니 bool 체크하고 while 아웃
-                                    if search_end_page != -1:
-                                        if search_page_dic.get(cur_page) is None:
-                                            search_page_dic[cur_page] = []
-                                        search_page_dic[cur_page].append(each_url)
-                                        is_all_find = True
-                            
-                            # 첫페이지를 못찾은 상태면 tmp_url_list 에 캐싱
-                            if search_start_page == -1:
-                                tmp_url_list.append(each_url)
-                            elif idx != 0 :
-                                search_page_dic[cur_page].append(each_url)
-
-                        idx += 1
-            cur_page += page_interval
-        return search_page_dic   
 
     # 검색할 url 목록을 돌면서 content 를 result에 담아서 리턴
-    def get_element_contents(self, search_page, start_date_str, end_date_str) :
+    def get_element_contents(self, search_url_list, start_date_str, end_date_str, keywords) :
         start_date = datetime.strptime(start_date_str, "%Y-%m-%d %H:%M")
         end_date = datetime.strptime(end_date_str, "%Y-%m-%d %H:%M") # 수정
         results = []
-        total_size = 0        
-        for page in search_page :
-            for url in search_page.get(page) :
-                total_size += 1
+        total_size = len(search_url_list)       
+        idx = 0
+        for url in search_url_list :
+            idx += 1
+            self.update_progress(idx/total_size)
+            self.status_label.setText(f"게시물 가져오는중... ( {idx} / {total_size} )")
 
-        idx = 1
-        for page in search_page :
-            for url in search_page.get(page) :
-                self.update_progress(idx/total_size)
-                self.status_label.setText(f"게시물 가져오는중... ( {idx} / {total_size} )")
+            each_response = requests.get(url)
+            each_soup = BeautifulSoup(each_response.content, "html.parser")
+            
+            
+            #
+            #
+            # 각 url을 읽으면서 제목,본문,등록일 을 가져온다
+            #
+            #
 
-                each_response = requests.get(url)
-                each_soup = BeautifulSoup(each_response.content, "html.parser")
-                
-                # 등록일 찾기
-                to_find_date = each_soup.find_all("ul", class_="p_tail")
+            # 제목
+            title_to_string = each_soup.find('h1', class_='core_title_txt')
 
-                for li in to_find_date.find("span", class_=""):
-                    if (li.has_attr("class") and len(li["class"]) > 0 and li["class"][0] == 'thread_top_list_folder'):
+            # 내용
+            content_to_string = each_soup.find('div', class_='d_post_content j_d_post_content clearfix')
+            
+            # 제목이나 본문에 내용없으면 pass
+            if (title_to_string is None or content_to_string is None):
+                continue
+
+            title_to_string = title_to_string.text.strip()
+            content_to_string = content_to_string.text.strip()
+
+            # # 등록일
+            date_str = None
+            # date_str = each_soup.find('ul', class_='p_tail') # 안잡혀 ㅜ.ㅜ
+            # date = self.now_date # date_str 을 datetime 으로 만들어줘야함. 임시로 현재시간
+            
+            # # 날짜 기준에 맞지 않으면 pass            
+            # if start_date > date > end_date:
+            #     continue
+
+            # 조건에 부합하는 content인지?
+            is_appendable = True
+
+            # 키워드 검색목록이 있으면 해당 키워드가 제목이나 내용에 포함되어야한다          
+            if (len(keywords) > 0):
+                is_appendable = False # 키워드값이 포함되어 있으면 True로 해준다
+                for keyword in keywords:
+                    keyword = keyword.strip()
+                    if (keyword is None or keyword == ''):
+                        continue
+                    if (keyword in title_to_string or keyword in content_to_string):
+                        is_appendable = True
                         break
-                    # 두번째 li만 봄
-                    else:
-                        date_element = li.find("span")
-                
-                if date_element:
-                    date_str = date_element.text.strip()
+            
+            # 조건에 부합하지 않기때문에 pass
+            if (not is_appendable):
+                continue
+            
+            # 엑셀 파일에 들어갈 제목과 내용 값 저장        
+            results.append({'제목': title_to_string, '내용': content_to_string, '등록일' : date_str})
 
-                    uploaded_date = datetime.strptime(date_str, "%Y-%m-%d %H:%M")
-
-                    # 게시물의 등록일이 기준에 맞으면: 
-                    if start_date <= uploaded_date <= end_date:
-                        
-                        # 제목과 내용을 각각 변수에 저장
-                        title = each_soup.find("a", class_="j_th_tit")
-                        contents = each_soup.find("div", class_='fr-view')
-                        content_element = contents.find_all("p")
-
-                        # 탑 키워드 함수 호출
-                        # keyword_result = get_top_keywords(self, title, content_element)
-                        
-                        # 제목을 스트링으로 변환
-                        title_to_string = title.string                    
-
-                        # 내용을 스트링으로 변환
-                        content_to_string = ''
-                        
-                        for i in content_element:
-                            if (i.string is not None):
-                                i.string.replace(" © Smilegate RPG All rights reserved. ","")
-                                content_to_string += i.string
-                            content_to_string += '\n'
-                            
-
-                        # 예외처리                     
-                        if (title_to_string is not None and content_to_string is not None):
-                                    
-                            ## 그 게시물의 제목이나 내용에 키워드가 있을 경우    
-                            #if (keyword in title_to_string or keyword in content_to_string):
-                                        
-                            # 엑셀 파일에 들어갈 제목과 내용 값 저장        
-                            results.append({'제목': title_to_string, '내용': content_to_string, '등록일' : date_str})
-
-                        else:
-                            continue                
-                idx += 1
         return results
 
-    # 키워드 입력 시 키워드가 있는 데이터 추출 함
-    def find_keyword_contents(self, search_page, start_date_str, end_date_str, keyword):
-        print("호출")
-        start_date = datetime.strptime(start_date_str, "%Y-%m-%d %H:%M")
-        end_date = datetime.strptime(end_date_str, "%Y-%m-%d %H:%M")
-        results = []
-        total_size = 0        
-        for page in search_page :
-            for url in search_page.get(page) :
-                total_size += 1
-
-        idx = 1
-        for page in search_page :
-            for url in search_page.get(page) :
-                self.update_progress(idx/total_size)
-                self.status_label.setText(f"게시물 가져오는중... ( {idx} / {total_size} )")
-
-                each_response = requests.get(url)
-                each_soup = BeautifulSoup(each_response.content, "html.parser")
-
-                # 등록일 찾기
-                to_find_date = each_soup.find_all("ul", class_="p_tail")
-
-                for li in to_find_date.find("span", class_=""):
-                    if (li.has_attr("class") and len(li["class"]) > 0 and li["class"][0] == 'thread_top_list_folder'):
-                        break
-                    # 두번째 li만 봄
-                    else:
-                        date_element = li.find("span")
-                
-                if date_element:
-                    date_str = date_element.text.strip()
-
-                    uploaded_date = datetime.strptime(date_str, "%Y-%m-%d %H:%M")
-
-                    # 게시물의 등록일이 기준에 맞으면: 
-                    if start_date <= uploaded_date <= end_date:
-                        # 제목과 내용을 각각 변수에 저장
-                        title = each_soup.find("a", class_="j_th_tit")
-                        
-                        # 제목을 스트링으로 변환
-                        title_to_string = title.string
-
-                        # 게시물의 제목에 키워드가 있을 경우, 내용을 저장    
-                        if (keyword in title_to_string):
-                            contents = each_soup.find("div", class_='fr-view')
-                            content_element = contents.find_all("p")          
-
-                            # 내용을 스트링으로 변환
-                            content_to_string = ''
-                            
-                            for i in content_element:
-                                if (i.string is not None):
-                                    i.string.replace(" © Smilegate RPG All rights reserved. ","")
-                                    content_to_string += i.string
-                                content_to_string += '\n'
-
-                            # 예외처리                     
-                            if (title_to_string is not None and content_to_string is not None):
-                                            
-                                    # 엑셀 파일에 들어갈 제목과 내용 값 저장        
-                                    results.append({'제목': title_to_string, '내용': content_to_string, '등록일' : date_str})
-
-                            else:
-                                continue
-                            
-                        # 게시물의 제목에 키워드가 없을 경우,
-                        elif (keyword not in title_to_string):
-                            contents = each_soup.find("div", class_='fr-view')
-                            content_element = contents.find_all("p")          
-
-                            # 내용을 스트링으로 변환
-                            content_to_string = ''
-                            
-                            for i in content_element:
-                                if (i.string is not None):
-                                    i.string.replace(" © Smilegate RPG All rights reserved. ","")
-                                    content_to_string += i.string
-                                content_to_string += '\n'
-                            
-                            # 내용에 키워드가 있을 경우
-                            if (keyword in content_to_string):
-                                
-                                # 예외처리                     
-                                if (title_to_string is not None and content_to_string is not None):
-                                            
-                                    # 엑셀 파일에 들어갈 제목과 내용 값 저장        
-                                    results.append({'제목': title_to_string, '내용': content_to_string, '등록일' : date_str})
-
-                                else:
-                                    continue      
-                idx += 1
-        return results
-                   
 
     # 시작시간과 끝시간 사이에 있는 시간인지 리턴
-    def is_valid_date_format(self, date_string, start_date, end_date, now_date):
-        date_pattern = r'(\d{4})-(\d{2})-(\d{2})'  # yyyy-mm-dd 형식의 정규 표현식   
+    def is_valid_date_format(self, date_string, start_date, end_date, first_element_date):
+        date = self.get_datetime_by_string(date_string)
 
-        if re.match(date_pattern, date_string):
-            date = datetime.strptime(date_string, "%Y-%m-%d")
-            if start_date <= date <= end_date:
-                return True
-            else:
-                return False
-        # 끝나는날짜가 오늘이고 xxx 전 이면 True
-        # 수정 --> HH:MM 형태일 경우, True
-        elif end_date.day >= now_date.day and ":" in date_string:
+        # 검색을 시작한 첫번째 글의 date 이후의 글이고 (검색시작한 시간이후의 글을 발견했을때는 건너뛰도록 하기 위함)
+        # 시작시간~끝시간 사이에 해당하는 값이면 true를 리턴
+        first_element_date = first_element_date - timedelta(microseconds=first_element_date.microsecond)
+        date = date - timedelta(microseconds=date.microsecond)
+        if first_element_date >= date and start_date <= date <= end_date:
             return True
         else:
             return False
+
+
+    # 날짜 or 시간의 string값으로 datetime을 return        
+    def get_datetime_by_string(self, date_string):
+        date = self.now_date
+
+        # 날짜 패턴에 맞는 데이터는 해당날짜의 00:00 분으로 date에 넣어줌
+        if re.match(self.date_pattern, date_string):
+            date_obj = datetime.strptime(date_string, "%m-%d")
+            date = datetime(date.year, date_obj.month, date_obj.day)
+        # 시간 패턴에 맞는 데이터는 오늘날짜의 해당시간으로 date에 넣어줌
+        elif re.match(self.time_pattern, date_string):            
+            time_obj = datetime.strptime(date_string, "%H:%M")            
+            date = datetime.combine(date.date(), time_obj.time())
+
+        return date
+            
         
 
 if __name__ == "__main__":
